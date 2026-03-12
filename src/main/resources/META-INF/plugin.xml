@@ -4,8 +4,16 @@
     <name>AI Commit</name>
     <vendor url="https://github.com/coolmentha">coolmentha</vendor>
     <description><![CDATA[
-        在 IntelliJ IDEA 提交窗口中调用 AI 分析待提交代码并生成 commit message。<br/>
-        支持自定义 Prompt、可选提交格式模板，以及对 AI 返回结果做格式校验。
+        在 IntelliJ IDEA Commit 工具窗口中一键生成 commit message。<br/>
+        <br/>
+        主要能力：<br/>
+        <ul>
+            <li>支持 OpenAI 兼容 API Key 与 Codex OAuth 两种认证模式</li>
+            <li>支持插件内网页登录，也可复用本机已有的 Codex 登录态</li>
+            <li>支持自定义模型、API Base URL 和 Prompt 模板</li>
+            <li>支持提交格式模板校验，例如 <code>{{type}}({{scope}}): {{subject}}</code></li>
+            <li>自动收集当前勾选变更、分支名和可读取的新文件内容作为上下文</li>
+        </ul>
     ]]></description>
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.vcs</depends>
@@ -20,7 +28,7 @@
         <action id="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
                 class="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
                 text="AI 生成提交信息"
-                description="分析待提交代码并生成 commit message">
+                description="分析当前勾选的变更并生成 commit message">
             <add-to-group group-id="ChangesView.CommitToolbar" anchor="last"/>
         </action>
     </actions>

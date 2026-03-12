@@ -38,7 +38,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            Initial version
+            <ul>
+                <li>在 Commit 工具窗口中一键生成提交信息</li>
+                <li>支持 OpenAI 兼容 API Key 与 Codex OAuth 双认证</li>
+                <li>支持 Prompt 模板、自定义 Base URL 与提交格式模板校验</li>
+            </ul>
         """.trimIndent()
     }
 }
