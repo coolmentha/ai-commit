@@ -1,0 +1,27 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>org.coolmentha.ai-commit</id>
+    <name>AI Commit</name>
+    <vendor url="https://github.com/coolmentha">coolmentha</vendor>
+    <description><![CDATA[
+        在 IntelliJ IDEA 提交窗口中调用 AI 分析待提交代码并生成 commit message。<br/>
+        支持自定义 Prompt、可选提交格式模板，以及对 AI 返回结果做格式校验。
+    ]]></description>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable
+                id="org.coolmentha.aicommit.settings"
+                displayName="AI Commit"
+                instance="org.coolmentha.aicommit.settings.AiCommitSettingsConfigurable"/>
+        <notificationGroup id="AI Commit" displayType="BALLOON" isLogByDefault="true"/>
+    </extensions>
+    <actions>
+        <action id="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
+                class="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
+                text="AI 生成提交信息"
+                description="分析待提交代码并生成 commit message">
+            <add-to-group group-id="ChangesView.CommitToolbar" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
