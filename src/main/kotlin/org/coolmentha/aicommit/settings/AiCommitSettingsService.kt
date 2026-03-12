@@ -14,13 +14,13 @@ class AiCommitSettingsService : PersistentStateComponent<AiCommitSettingsState> 
     override fun getState(): AiCommitSettingsState = state
 
     override fun loadState(state: AiCommitSettingsState) {
-        this.state = state.copy()
+        this.state = state.migrateLegacyModeFields().normalizedForStorage()
     }
 
     fun snapshot(): AiCommitSettingsState = state.copy()
 
     fun update(newState: AiCommitSettingsState) {
-        state = newState.copy()
+        state = newState.migrateLegacyModeFields().normalizedForStorage()
     }
 
     companion object {
