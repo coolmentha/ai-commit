@@ -1,5 +1,7 @@
 package org.coolmentha.aicommit.settings
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
@@ -17,10 +19,16 @@ import org.coolmentha.aicommit.ai.CodexOAuthCredentialSource
 import org.coolmentha.aicommit.ai.CodexOAuthCredentialsResolver
 import java.awt.BorderLayout
 import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.swing.Box
 import javax.swing.BoxLayout
+import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JComboBox
@@ -30,12 +38,15 @@ class AiCommitSettingsPanel {
     private val authModeComboBox = JComboBox(AiCommitAuthMode.entries.toTypedArray())
     private val apiBaseUrlField = JBTextField()
     private val apiKeyField = JBPasswordField()
-    private val modelField = JBTextField()
+    private val modelComboBox = JComboBox<String>().apply { isEditable = true }
     private val promptTemplateArea = JBTextArea()
     private val formatTemplateArea = JBTextArea()
     private val authModeHintLabel = JBLabel()
     private val codexOAuthStatusLabel = JBLabel()
     private val codexOAuthLoginButton = JButton("网页登录")
+
+    private lateinit var apiBaseUrlBlock: JComponent
+    private lateinit var apiKeyBlock: JComponent
 
     private val rootPanel = JPanel(BorderLayout())
     private var suppressAuthModeSync = false
@@ -43,6 +54,9 @@ class AiCommitSettingsPanel {
     private var apiKeyModeBaseUrl = ""
     private var codexOauthModeBaseUrl = ""
     private val statusTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault())
+    private val httpClient: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
+    private val objectMapper = jacksonObjectMapper()
+    private var lastFetchedModelsKey = ""
 
     init {
         promptTemplateArea.lineWrap = true
@@ -60,6 +74,23 @@ class AiCommitSettingsPanel {
             startCodexOAuthLogin()
         }
 
+        apiBaseUrlField.addActionListener {
+            if (selectedAuthMode() == AiCommitAuthMode.API_KEY) fetchModelsInBackground(force = true)
+        }
+        apiBaseUrlField.addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusLost(e: java.awt.event.FocusEvent) {
+                if (selectedAuthMode() == AiCommitAuthMode.API_KEY) fetchModelsInBackground()
+            }
+        })
+        apiKeyField.addActionListener {
+            if (selectedAuthMode() == AiCommitAuthMode.API_KEY) fetchModelsInBackground(force = true)
+        }
+        apiKeyField.addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusLost(e: java.awt.event.FocusEvent) {
+                if (selectedAuthMode() == AiCommitAuthMode.API_KEY) fetchModelsInBackground()
+            }
+        })
+
         val contentPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             border = JBUI.Borders.empty(16)
@@ -70,9 +101,11 @@ class AiCommitSettingsPanel {
                     authModeBlock(),
                 ),
             )
-            add(fieldBlock("API Base URL", "认证模式留空时会自动回填对应默认地址，也可以手工覆盖。", apiBaseUrlField))
-            add(fieldBlock("API Key", "仅 API Key 模式需要填写。", apiKeyField))
-            add(fieldBlock("模型", "API Key 模式示例：`gpt-4.1-mini`；Codex OAuth 模式建议使用 `gpt-5.4` 或其他 Codex 模型。", modelField))
+            apiBaseUrlBlock = fieldBlock("API Base URL", "认证模式留空时会自动回填对应默认地址，也可以手工覆盖。", apiBaseUrlField)
+            apiKeyBlock = fieldBlock("API Key", "仅 API Key 模式需要填写。", apiKeyField)
+            add(apiBaseUrlBlock)
+            add(apiKeyBlock)
+            add(fieldBlock("模型", "API Key 模式示例：`gpt-4.1-mini`；Codex OAuth 模式建议使用 `gpt-5.4` 或其他 Codex 模型。API Key 模式会尝试从接口拉取可用模型列表。", modelComboBox))
             add(
                 fieldBlock(
                     "Prompt 模板",
@@ -105,7 +138,9 @@ class AiCommitSettingsPanel {
         authModeComboBox.selectedItem = currentAuthMode
         apiBaseUrlField.text = normalizedState.normalizedApiBaseUrl(currentAuthMode)
         apiKeyField.text = normalizedState.apiKey
-        modelField.text = normalizedState.model
+        modelComboBox.removeAllItems()
+        modelComboBox.editor.item = normalizedState.model
+        lastFetchedModelsKey = ""
         promptTemplateArea.text = normalizedState.normalizedPromptTemplate()
         formatTemplateArea.text = normalizedState.commitFormatTemplate
         suppressAuthModeSync = false
@@ -122,7 +157,7 @@ class AiCommitSettingsPanel {
             apiKeyBaseUrl = apiKeyModeBaseUrl,
             codexOauthBaseUrl = codexOauthModeBaseUrl,
             apiKey = String(apiKeyField.password),
-            model = modelField.text.trim(),
+            model = (modelComboBox.editor.item as? String)?.trim().orEmpty(),
             promptTemplate = promptTemplateArea.text,
             commitFormatTemplate = formatTemplateArea.text,
         ).normalizedForStorage()
@@ -183,11 +218,13 @@ class AiCommitSettingsPanel {
 
     private fun updateAuthModeUi() {
         val authMode = selectedAuthMode()
-        val apiKeyEnabled = authMode == AiCommitAuthMode.API_KEY
-        apiKeyField.isEnabled = apiKeyEnabled
-        codexOAuthLoginButton.isVisible = authMode == AiCommitAuthMode.CODEX_OAUTH
-        codexOAuthLoginButton.isEnabled = authMode == AiCommitAuthMode.CODEX_OAUTH
-        codexOAuthStatusLabel.isVisible = authMode == AiCommitAuthMode.CODEX_OAUTH
+        val isApiKey = authMode == AiCommitAuthMode.API_KEY
+        apiBaseUrlBlock.isVisible = isApiKey
+        apiKeyBlock.isVisible = isApiKey
+        apiKeyField.isEnabled = isApiKey
+        codexOAuthLoginButton.isVisible = !isApiKey
+        codexOAuthLoginButton.isEnabled = !isApiKey
+        codexOAuthStatusLabel.isVisible = !isApiKey
         authModeHintLabel.text = when (authMode) {
             AiCommitAuthMode.API_KEY ->
                 "手工输入 API Key，请求会发送到 OpenAI 兼容 `/chat/completions` 接口。"
@@ -196,6 +233,8 @@ class AiCommitSettingsPanel {
         }
         if (authMode == AiCommitAuthMode.CODEX_OAUTH) {
             refreshCodexOAuthStatus()
+        } else {
+            fetchModelsInBackground()
         }
     }
 
@@ -250,6 +289,78 @@ class AiCommitSettingsPanel {
         }
     }
 
+    private fun fetchModelsInBackground(force: Boolean = false) {
+        if (selectedAuthMode() != AiCommitAuthMode.API_KEY) {
+            return
+        }
+        val baseUrl = normalizedBaseUrlFor(AiCommitAuthMode.API_KEY)
+        val apiKey = String(apiKeyField.password).trim()
+        if (apiKey.isBlank()) {
+            return
+        }
+        val requestKey = "$baseUrl\n$apiKey"
+        if (!force && requestKey == lastFetchedModelsKey) {
+            return
+        }
+        lastFetchedModelsKey = requestKey
+        val currentValue = (modelComboBox.editor.item as? String)?.trim().orEmpty()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val models = runCatching { fetchApiKeyModels(baseUrl, apiKey) }.getOrDefault(emptyList())
+            if (models.isEmpty()) {
+                return@executeOnPooledThread
+            }
+            ApplicationManager.getApplication().invokeLater {
+                if (selectedAuthMode() != AiCommitAuthMode.API_KEY) {
+                    return@invokeLater
+                }
+                val latestBaseUrl = normalizedBaseUrlFor(AiCommitAuthMode.API_KEY)
+                val latestApiKey = String(apiKeyField.password).trim()
+                if (latestBaseUrl != baseUrl || latestApiKey != apiKey) {
+                    return@invokeLater
+                }
+                val mergedItems = linkedSetOf<String>()
+                if (currentValue.isNotBlank()) {
+                    mergedItems += currentValue
+                }
+                mergedItems += models
+                modelComboBox.model = DefaultComboBoxModel(mergedItems.toTypedArray())
+                modelComboBox.editor.item = currentValue.ifBlank { models.firstOrNull().orEmpty() }
+            }
+        }
+    }
+
+    private fun fetchApiKeyModels(baseUrl: String, apiKey: String): List<String> {
+        val endpoint = resolveModelsEndpoint(baseUrl)
+        val request = HttpRequest.newBuilder(endpoint)
+            .timeout(Duration.ofSeconds(20))
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer $apiKey")
+            .GET()
+            .build()
+        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        if (response.statusCode() !in 200..299) {
+            return emptyList()
+        }
+        val payload = runCatching {
+            objectMapper.readValue(response.body(), ModelsResponse::class.java)
+        }.getOrNull() ?: return emptyList()
+        return payload.data
+            .mapNotNull { it.id?.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+
+    private fun resolveModelsEndpoint(baseUrl: String): URI {
+        val normalized = baseUrl.trim().trimEnd('/')
+        val endpoint = when {
+            normalized.endsWith("/models") -> normalized
+            normalized.endsWith("/chat/completions") -> normalized.removeSuffix("/chat/completions") + "/models"
+            else -> "$normalized/models"
+        }
+        return URI.create(endpoint)
+    }
+
     private fun promptForManualCallback(authUrl: URI): String? {
         val result = arrayOfNulls<String>(1)
         ApplicationManager.getApplication().invokeAndWait {
@@ -294,6 +405,16 @@ $authUrl
             "当前状态：已登录，来源：$source，过期时间：${statusTimeFormatter.format(credential.expiresAt)}。"
         codexOAuthStatusLabel.toolTipText = credential.sourcePath?.toString()
     }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class ModelsResponse(
+        val data: List<ModelItem> = emptyList(),
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private data class ModelItem(
+        val id: String? = null,
+    )
 
     private fun notify(message: String, type: NotificationType) {
         NotificationGroupManager.getInstance()

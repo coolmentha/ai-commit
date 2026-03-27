@@ -4,7 +4,7 @@
     <name>AI Commit</name>
     <vendor url="https://github.com/coolmentha">coolmentha</vendor>
     <description><![CDATA[
-        在 IntelliJ IDEA Commit 工具窗口中一键生成 commit message。<br/>
+        AI Commit helps you generate commit messages from selected changes in the IntelliJ IDEA Commit tool window.<br/>
         <br/>
         主要能力：<br/>
         <ul>
@@ -14,6 +14,11 @@
             <li>支持提交格式模板校验，例如 <code>{{type}}({{scope}}): {{subject}}</code></li>
             <li>自动收集当前勾选变更、分支名和可读取的新文件内容作为上下文</li>
         </ul>
+        开源仓库：<a href="https://github.com/coolmentha/ai-commit">github.com/coolmentha/ai-commit</a><br/>
+        如果这个插件对你有帮助，欢迎到仓库给我点个 Star。<br/>
+        <br/>
+        <strong>Codex 风险提示：</strong>Codex OAuth 模式会复用本机 Codex 登录态，并将待提交 diff 发送到远端服务。启用前请确认账号权限、网络策略与代码外发风险。<br/>
+        <strong>免责声明：</strong>用户输入的提示词、描述内容或相关操作，可能触发 Codex 或平台侧的滥用检测、限流、拒答、功能限制或账号限制。相关判定由平台独立执行，本插件不参与审核逻辑，也无法干预、规避或保证其结果；因前述机制产生的后果不属于本插件责任范围。<br/>
     ]]></description>
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.vcs</depends>
@@ -28,7 +33,8 @@
         <action id="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
                 class="org.coolmentha.aicommit.action.GenerateCommitMessageAction"
                 text="AI 生成提交信息"
-                description="分析当前勾选的变更并生成 commit message">
+                description="分析当前勾选的变更并生成 commit message"
+        >
             <add-to-group group-id="ChangesView.CommitToolbar" anchor="last"/>
         </action>
     </actions>
