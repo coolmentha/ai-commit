@@ -16,23 +16,30 @@ import java.util.concurrent.TimeUnit
 object CommitDiffCollector {
     private const val MAX_DIFF_CHARS = 16_000
     private const val MAX_UNVERSIONED_FILE_BYTES = 12_000L
+    private const val GIT_COMMAND_TIMEOUT_SECONDS = 5L
 
     fun collect(
         project: Project,
         includedChanges: Collection<Change>,
         includedUnversionedFiles: Collection<FilePath>,
+        isAmendCommit: Boolean = false,
     ): String {
-        val parts = mutableListOf<String>()
-
+        val currentParts = mutableListOf<String>()
         if (includedChanges.isNotEmpty()) {
-            parts += buildPatch(project, includedChanges)
+            currentParts += buildPatch(project, includedChanges)
         }
-
         if (includedUnversionedFiles.isNotEmpty()) {
-            parts += renderUnversionedFiles(project, includedUnversionedFiles)
+            currentParts += renderUnversionedFiles(project, includedUnversionedFiles)
         }
 
-        val raw = parts.filter { it.isNotBlank() }.joinToString(separator = "\n\n").trim()
+        val currentDiff = currentParts.filter { it.isNotBlank() }.joinToString(separator = "\n\n").trim()
+        val amendBaseDiff = if (isAmendCommit) {
+            collectLastCommitDiff(resolveProjectRoot(project))
+        } else {
+            ""
+        }
+
+        val raw = composeDiff(amendBaseDiff, currentDiff, isAmendCommit)
         if (raw.isBlank()) {
             return ""
         }
@@ -59,6 +66,29 @@ object CommitDiffCollector {
         } catch (_: Exception) {
             "unknown"
         }
+    }
+
+    internal fun collectLastCommitDiff(projectRoot: Path): String {
+        return runGitCommand(projectRoot, "show", "--format=", "--no-ext-diff", "HEAD")
+    }
+
+    internal fun composeDiff(
+        amendBaseDiff: String,
+        currentDiff: String,
+        isAmendCommit: Boolean,
+    ): String {
+        if (!isAmendCommit) {
+            return currentDiff.trim()
+        }
+
+        val parts = mutableListOf<String>()
+        if (amendBaseDiff.isNotBlank()) {
+            parts += renderDiffSection("amend 基础 diff（最近一次提交 HEAD）", amendBaseDiff)
+        }
+        if (currentDiff.isNotBlank()) {
+            parts += renderDiffSection("amend 追加 diff（当前勾选改动）", currentDiff)
+        }
+        return parts.joinToString(separator = "\n\n").trim()
     }
 
     private fun buildPatch(project: Project, includedChanges: Collection<Change>): String {
@@ -109,5 +139,40 @@ object CommitDiffCollector {
 
     private fun resolveProjectRoot(project: Project): Path {
         return project.basePath?.let(Path::of) ?: error("当前项目没有可用的根目录。")
+    }
+
+    private fun renderDiffSection(title: String, diff: String): String {
+        return buildString {
+            append("[")
+            append(title)
+            append("]\n")
+            append(diff.trim())
+        }.trim()
+    }
+
+    private fun runGitCommand(projectRoot: Path, vararg args: String): String {
+        return try {
+            val process = ProcessBuilder(buildList {
+                add("git")
+                add("-C")
+                add(projectRoot.toString())
+                addAll(args)
+            }).redirectErrorStream(true).start()
+
+            if (!process.waitFor(GIT_COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly()
+                return ""
+            }
+
+            if (process.exitValue() != 0) {
+                return ""
+            }
+
+            process.inputStream.bufferedReader(StandardCharsets.UTF_8).use { reader ->
+                reader.readText().trim()
+            }
+        } catch (_: Exception) {
+            ""
+        }
     }
 }

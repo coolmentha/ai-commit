@@ -9,6 +9,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.vcs.VcsDataKeys
+import com.intellij.vcs.commit.CommitWorkflowHandler
 import com.intellij.vcs.commit.CommitWorkflowUi
 import org.coolmentha.aicommit.ai.AiCommitException
 import org.coolmentha.aicommit.ai.AiCommitMessageGenerator
@@ -21,8 +22,10 @@ class GenerateCommitMessageAction : DumbAwareAction("AI 生成提交信息") {
 
     override fun update(event: AnActionEvent) {
         val workflowUi = event.getData(VcsDataKeys.COMMIT_WORKFLOW_UI)
+        val workflowHandler = event.getData(VcsDataKeys.COMMIT_WORKFLOW_HANDLER)
         val hasChanges = workflowUi?.getIncludedChanges()?.isNotEmpty() == true ||
-            workflowUi?.getIncludedUnversionedFiles()?.isNotEmpty() == true
+            workflowUi?.getIncludedUnversionedFiles()?.isNotEmpty() == true ||
+            isAmendCommit(workflowHandler)
         event.presentation.isVisible = workflowUi != null
         event.presentation.isEnabled = hasChanges
     }
@@ -30,7 +33,9 @@ class GenerateCommitMessageAction : DumbAwareAction("AI 生成提交信息") {
     override fun actionPerformed(event: AnActionEvent) {
         val project = event.project ?: return
         val workflowUi = event.getData(VcsDataKeys.COMMIT_WORKFLOW_UI) ?: return
+        val workflowHandler = event.getData(VcsDataKeys.COMMIT_WORKFLOW_HANDLER)
         val settings = settingsService.snapshot()
+        val isAmendCommit = isAmendCommit(workflowHandler)
 
         if (!settings.isConfigured()) {
             notify(project, NotificationType.WARNING, "请先在设置中完成 AI 接口配置。")
@@ -51,7 +56,13 @@ class GenerateCommitMessageAction : DumbAwareAction("AI 生成提交信息") {
                     indicator.isIndeterminate = false
                     indicator.fraction = 0.2
                     indicator.text = "收集待提交差异"
-                    generatedMessage = generator.generate(project, includedChanges, includedUnversionedFiles, settings)
+                    generatedMessage = generator.generate(
+                        project = project,
+                        includedChanges = includedChanges,
+                        includedUnversionedFiles = includedUnversionedFiles,
+                        settings = settings,
+                        isAmendCommit = isAmendCommit,
+                    )
                     indicator.fraction = 1.0
                 }
 
@@ -81,5 +92,9 @@ class GenerateCommitMessageAction : DumbAwareAction("AI 生成提交信息") {
             .getNotificationGroup("AI Commit")
             .createNotification(content, type)
             .notify(project)
+    }
+
+    private fun isAmendCommit(workflowHandler: CommitWorkflowHandler?): Boolean {
+        return workflowHandler?.amendCommitHandler?.isAmendCommitMode == true
     }
 }

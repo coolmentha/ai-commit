@@ -17,8 +17,9 @@ class AiCommitMessageGenerator(
         includedChanges: Collection<Change>,
         includedUnversionedFiles: Collection<FilePath>,
         settings: AiCommitSettingsState,
+        isAmendCommit: Boolean = false,
     ): String {
-        val diff = CommitDiffCollector.collect(project, includedChanges, includedUnversionedFiles)
+        val diff = CommitDiffCollector.collect(project, includedChanges, includedUnversionedFiles, isAmendCommit)
         if (diff.isBlank()) {
             throw AiCommitException("没有可分析的待提交代码差异。")
         }
